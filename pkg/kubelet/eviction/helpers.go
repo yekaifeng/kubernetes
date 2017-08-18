@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/v1"
 	v1qos "k8s.io/kubernetes/pkg/api/v1/helper/qos"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
@@ -54,6 +54,8 @@ const (
 	resourceNodeFs v1.ResourceName = "nodefs"
 	// nodefs inodes, number.  internal to this module, used to account for local node root filesystem inodes.
 	resourceNodeFsInodes v1.ResourceName = "nodefsInodes"
+	// container overlay storage, in bytes.  internal to this module, used to account for local disk usage for container overlay.
+	resourceOverlay v1.ResourceName = "overlay"
 )
 
 var (
@@ -74,19 +76,25 @@ func init() {
 	signalToNodeCondition[evictionapi.SignalNodeFsAvailable] = v1.NodeDiskPressure
 	signalToNodeCondition[evictionapi.SignalImageFsInodesFree] = v1.NodeDiskPressure
 	signalToNodeCondition[evictionapi.SignalNodeFsInodesFree] = v1.NodeDiskPressure
+	signalToNodeCondition[evictionapi.SignalAllocatableNodeFsAvailable] = v1.NodeDiskPressure
 
 	// map signals to resources (and vice-versa)
 	signalToResource = map[evictionapi.Signal]v1.ResourceName{}
 	signalToResource[evictionapi.SignalMemoryAvailable] = v1.ResourceMemory
 	signalToResource[evictionapi.SignalAllocatableMemoryAvailable] = v1.ResourceMemory
+	signalToResource[evictionapi.SignalAllocatableNodeFsAvailable] = resourceNodeFs
 	signalToResource[evictionapi.SignalImageFsAvailable] = resourceImageFs
 	signalToResource[evictionapi.SignalImageFsInodesFree] = resourceImageFsInodes
 	signalToResource[evictionapi.SignalNodeFsAvailable] = resourceNodeFs
 	signalToResource[evictionapi.SignalNodeFsInodesFree] = resourceNodeFsInodes
+
 	resourceToSignal = map[v1.ResourceName]evictionapi.Signal{}
 	for key, value := range signalToResource {
 		resourceToSignal[value] = key
 	}
+	// Hard-code here to make sure resourceNodeFs maps to evictionapi.SignalNodeFsAvailable
+	// (TODO) resourceToSignal is a map from resource name to a list of signals
+	resourceToSignal[resourceNodeFs] = evictionapi.SignalNodeFsAvailable
 }
 
 // validSignal returns true if the signal is supported.
@@ -226,6 +234,16 @@ func getAllocatableThreshold(allocatableConfig []string) []evictionapi.Threshold
 			return []evictionapi.Threshold{
 				{
 					Signal:   evictionapi.SignalAllocatableMemoryAvailable,
+					Operator: evictionapi.OpLessThan,
+					Value: evictionapi.ThresholdValue{
+						Quantity: resource.NewQuantity(int64(0), resource.BinarySI),
+					},
+					MinReclaim: &evictionapi.ThresholdValue{
+						Quantity: resource.NewQuantity(int64(0), resource.BinarySI),
+					},
+				},
+				{
+					Signal:   evictionapi.SignalAllocatableNodeFsAvailable,
 					Operator: evictionapi.OpLessThan,
 					Value: evictionapi.ThresholdValue{
 						Quantity: resource.NewQuantity(int64(0), resource.BinarySI),
@@ -382,10 +400,12 @@ func localVolumeNames(pod *v1.Pod) []string {
 func podDiskUsage(podStats statsapi.PodStats, pod *v1.Pod, statsToMeasure []fsStatsType) (v1.ResourceList, error) {
 	disk := resource.Quantity{Format: resource.BinarySI}
 	inodes := resource.Quantity{Format: resource.BinarySI}
+	overlay := resource.Quantity{Format: resource.BinarySI}
 	for _, container := range podStats.Containers {
 		if hasFsStatsType(statsToMeasure, fsStatsRoot) {
 			disk.Add(*diskUsage(container.Rootfs))
 			inodes.Add(*inodeUsage(container.Rootfs))
+			overlay.Add(*diskUsage(container.Rootfs))
 		}
 		if hasFsStatsType(statsToMeasure, fsStatsLogs) {
 			disk.Add(*diskUsage(container.Logs))
@@ -405,8 +425,9 @@ func podDiskUsage(podStats statsapi.PodStats, pod *v1.Pod, statsToMeasure []fsSt
 		}
 	}
 	return v1.ResourceList{
-		resourceDisk:   disk,
-		resourceInodes: inodes,
+		resourceDisk:    disk,
+		resourceInodes:  inodes,
+		resourceOverlay: overlay,
 	}, nil
 }
 
@@ -637,16 +658,11 @@ func (a byEvictionPriority) Less(i, j int) bool {
 }
 
 // makeSignalObservations derives observations using the specified summary provider.
-func makeSignalObservations(summaryProvider stats.SummaryProvider, nodeProvider NodeProvider) (signalObservations, statsFunc, error) {
+func makeSignalObservations(summaryProvider stats.SummaryProvider, capacityProvider CapacityProvider, pods []*v1.Pod, withImageFs bool) (signalObservations, statsFunc, error) {
 	summary, err := summaryProvider.Get()
 	if err != nil {
 		return nil, nil, err
 	}
-	node, err := nodeProvider.GetNode()
-	if err != nil {
-		return nil, nil, err
-	}
-
 	// build the function to work against for pod stats
 	statsFunc := cachedStatsFunc(summary.Pods)
 	// build an evaluation context for current eviction signals
@@ -693,8 +709,12 @@ func makeSignalObservations(summaryProvider stats.SummaryProvider, nodeProvider 
 			}
 		}
 	}
-	if memoryAllocatableCapacity, ok := node.Status.Allocatable[v1.ResourceMemory]; ok {
-		memoryAllocatableAvailable := memoryAllocatableCapacity.Copy()
+
+	nodeCapacity := capacityProvider.GetCapacity()
+	allocatableReservation := capacityProvider.GetNodeAllocatableReservation()
+
+	memoryAllocatableCapacity, memoryAllocatableAvailable, exist := getResourceAllocatable(nodeCapacity, allocatableReservation, v1.ResourceMemory)
+	if exist {
 		for _, pod := range summary.Pods {
 			mu, err := podMemoryUsage(pod)
 			if err == nil {
@@ -703,10 +723,53 @@ func makeSignalObservations(summaryProvider stats.SummaryProvider, nodeProvider 
 		}
 		result[evictionapi.SignalAllocatableMemoryAvailable] = signalObservation{
 			available: memoryAllocatableAvailable,
-			capacity:  memoryAllocatableCapacity.Copy(),
+			capacity:  memoryAllocatableCapacity,
 		}
 	}
+
+	storageScratchCapacity, storageScratchAllocatable, exist := getResourceAllocatable(nodeCapacity, allocatableReservation, v1.ResourceStorageScratch)
+	if exist {
+		for _, pod := range pods {
+			podStat, ok := statsFunc(pod)
+			if !ok {
+				continue
+			}
+
+			usage, err := podDiskUsage(podStat, pod, []fsStatsType{fsStatsLogs, fsStatsLocalVolumeSource, fsStatsRoot})
+			if err != nil {
+				glog.Warningf("eviction manager: error getting pod disk usage %v", err)
+				continue
+			}
+			// If there is a seperate imagefs set up for container runtimes, the scratch disk usage from nodefs should exclude the overlay usage
+			if withImageFs {
+				diskUsage := usage[resourceDisk]
+				diskUsageP := &diskUsage
+				diskUsagep := diskUsageP.Copy()
+				diskUsagep.Sub(usage[resourceOverlay])
+				storageScratchAllocatable.Sub(*diskUsagep)
+			} else {
+				storageScratchAllocatable.Sub(usage[resourceDisk])
+			}
+		}
+		result[evictionapi.SignalAllocatableNodeFsAvailable] = signalObservation{
+			available: storageScratchAllocatable,
+			capacity:  storageScratchCapacity,
+		}
+	}
+
 	return result, statsFunc, nil
+}
+
+func getResourceAllocatable(capacity v1.ResourceList, reservation v1.ResourceList, resourceName v1.ResourceName) (*resource.Quantity, *resource.Quantity, bool) {
+	if capacity, ok := capacity[resourceName]; ok {
+		allocate := capacity.Copy()
+		if reserved, exists := reservation[resourceName]; exists {
+			allocate.Sub(reserved)
+		}
+		return capacity.Copy(), allocate, true
+	}
+	glog.Errorf("Could not find capacity information for resource %v", resourceName)
+	return nil, nil, false
 }
 
 // thresholdsMet returns the set of thresholds that were met independent of grace period
@@ -967,32 +1030,34 @@ func PodIsEvicted(podStatus v1.PodStatus) bool {
 }
 
 // buildResourceToNodeReclaimFuncs returns reclaim functions associated with resources.
-func buildResourceToNodeReclaimFuncs(imageGC ImageGC, withImageFs bool) map[v1.ResourceName]nodeReclaimFuncs {
+func buildResourceToNodeReclaimFuncs(imageGC ImageGC, containerGC ContainerGC, withImageFs bool) map[v1.ResourceName]nodeReclaimFuncs {
 	resourceToReclaimFunc := map[v1.ResourceName]nodeReclaimFuncs{}
 	// usage of an imagefs is optional
 	if withImageFs {
 		// with an imagefs, nodefs pressure should just delete logs
-		resourceToReclaimFunc[resourceNodeFs] = nodeReclaimFuncs{deleteLogs()}
-		resourceToReclaimFunc[resourceNodeFsInodes] = nodeReclaimFuncs{deleteLogs()}
+		resourceToReclaimFunc[resourceNodeFs] = nodeReclaimFuncs{}
+		resourceToReclaimFunc[resourceNodeFsInodes] = nodeReclaimFuncs{}
 		// with an imagefs, imagefs pressure should delete unused images
-		resourceToReclaimFunc[resourceImageFs] = nodeReclaimFuncs{deleteImages(imageGC, true)}
-		resourceToReclaimFunc[resourceImageFsInodes] = nodeReclaimFuncs{deleteImages(imageGC, false)}
+		resourceToReclaimFunc[resourceImageFs] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, true)}
+		resourceToReclaimFunc[resourceImageFsInodes] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, false)}
 	} else {
 		// without an imagefs, nodefs pressure should delete logs, and unused images
 		// since imagefs and nodefs share a common device, they share common reclaim functions
-		resourceToReclaimFunc[resourceNodeFs] = nodeReclaimFuncs{deleteLogs(), deleteImages(imageGC, true)}
-		resourceToReclaimFunc[resourceNodeFsInodes] = nodeReclaimFuncs{deleteLogs(), deleteImages(imageGC, false)}
-		resourceToReclaimFunc[resourceImageFs] = nodeReclaimFuncs{deleteLogs(), deleteImages(imageGC, true)}
-		resourceToReclaimFunc[resourceImageFsInodes] = nodeReclaimFuncs{deleteLogs(), deleteImages(imageGC, false)}
+		resourceToReclaimFunc[resourceNodeFs] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, true)}
+		resourceToReclaimFunc[resourceNodeFsInodes] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, false)}
+		resourceToReclaimFunc[resourceImageFs] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, true)}
+		resourceToReclaimFunc[resourceImageFsInodes] = nodeReclaimFuncs{deleteTerminatedContainers(containerGC), deleteImages(imageGC, false)}
 	}
 	return resourceToReclaimFunc
 }
 
-// deleteLogs will delete logs to free up disk pressure.
-func deleteLogs() nodeReclaimFunc {
+// deleteTerminatedContainers will delete terminated containers to free up disk pressure.
+func deleteTerminatedContainers(containerGC ContainerGC) nodeReclaimFunc {
 	return func() (*resource.Quantity, error) {
-		// TODO: not yet supported.
-		return resource.NewQuantity(int64(0), resource.BinarySI), nil
+		glog.Infof("eviction manager: attempting to delete unused containers")
+		err := containerGC.DeleteAllUnusedContainers()
+		// Calculating bytes freed is not yet supported.
+		return resource.NewQuantity(int64(0), resource.BinarySI), err
 	}
 }
 

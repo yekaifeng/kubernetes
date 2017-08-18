@@ -1,15 +1,24 @@
 docs/.generated_docs
+docs/admin/cloud-controller-manager.md
 docs/admin/federation-apiserver.md
 docs/admin/federation-controller-manager.md
 docs/admin/kube-apiserver.md
 docs/admin/kube-controller-manager.md
 docs/admin/kube-proxy.md
 docs/admin/kube-scheduler.md
+docs/admin/kubefed.md
+docs/admin/kubefed_init.md
+docs/admin/kubefed_join.md
+docs/admin/kubefed_options.md
+docs/admin/kubefed_unjoin.md
+docs/admin/kubefed_version.md
 docs/admin/kubelet.md
+docs/man/man1/cloud-controller-manager.1
 docs/man/man1/kube-apiserver.1
 docs/man/man1/kube-controller-manager.1
 docs/man/man1/kube-proxy.1
 docs/man/man1/kube-scheduler.1
+docs/man/man1/kubectl-alpha.1
 docs/man/man1/kubectl-annotate.1
 docs/man/man1/kubectl-api-versions.1
 docs/man/man1/kubectl-apiversions.1
@@ -34,6 +43,7 @@ docs/man/man1/kubectl-config-delete-cluster.1
 docs/man/man1/kubectl-config-delete-context.1
 docs/man/man1/kubectl-config-get-clusters.1
 docs/man/man1/kubectl-config-get-contexts.1
+docs/man/man1/kubectl-config-rename-context.1
 docs/man/man1/kubectl-config-set-cluster.1
 docs/man/man1/kubectl-config-set-context.1
 docs/man/man1/kubectl-config-set-credentials.1
@@ -96,9 +106,9 @@ docs/man/man1/kubectl-scale.1
 docs/man/man1/kubectl-set-image.1
 docs/man/man1/kubectl-set-resources.1
 docs/man/man1/kubectl-set-selector.1
+docs/man/man1/kubectl-set-serviceaccount.1
 docs/man/man1/kubectl-set-subject.1
 docs/man/man1/kubectl-set.1
-docs/man/man1/kubectl-stop.1
 docs/man/man1/kubectl-taint.1
 docs/man/man1/kubectl-top-node.1
 docs/man/man1/kubectl-top-pod.1
@@ -131,6 +141,7 @@ docs/user-guide/kubectl/kubectl_config_delete-cluster.md
 docs/user-guide/kubectl/kubectl_config_delete-context.md
 docs/user-guide/kubectl/kubectl_config_get-clusters.md
 docs/user-guide/kubectl/kubectl_config_get-contexts.md
+docs/user-guide/kubectl/kubectl_config_rename-context.md
 docs/user-guide/kubectl/kubectl_config_set-cluster.md
 docs/user-guide/kubectl/kubectl_config_set-context.md
 docs/user-guide/kubectl/kubectl_config_set-credentials.md
@@ -190,6 +201,7 @@ docs/user-guide/kubectl/kubectl_set.md
 docs/user-guide/kubectl/kubectl_set_image.md
 docs/user-guide/kubectl/kubectl_set_resources.md
 docs/user-guide/kubectl/kubectl_set_selector.md
+docs/user-guide/kubectl/kubectl_set_serviceaccount.md
 docs/user-guide/kubectl/kubectl_set_subject.md
 docs/user-guide/kubectl/kubectl_taint.md
 docs/user-guide/kubectl/kubectl_top.md
@@ -198,6 +210,7 @@ docs/user-guide/kubectl/kubectl_top_pod.md
 docs/user-guide/kubectl/kubectl_uncordon.md
 docs/user-guide/kubectl/kubectl_version.md
 docs/yaml/kubectl/kubectl.yaml
+docs/yaml/kubectl/kubectl_alpha.yaml
 docs/yaml/kubectl/kubectl_annotate.yaml
 docs/yaml/kubectl/kubectl_api-versions.yaml
 docs/yaml/kubectl/kubectl_apiversions.yaml
@@ -238,7 +251,6 @@ docs/yaml/kubectl/kubectl_run-container.yaml
 docs/yaml/kubectl/kubectl_run.yaml
 docs/yaml/kubectl/kubectl_scale.yaml
 docs/yaml/kubectl/kubectl_set.yaml
-docs/yaml/kubectl/kubectl_stop.yaml
 docs/yaml/kubectl/kubectl_taint.yaml
 docs/yaml/kubectl/kubectl_top.yaml
 docs/yaml/kubectl/kubectl_uncordon.yaml

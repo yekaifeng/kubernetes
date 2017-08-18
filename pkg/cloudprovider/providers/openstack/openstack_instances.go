@@ -18,15 +18,15 @@ package openstack
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 
 	"github.com/golang/glog"
 	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	"github.com/gophercloud/gophercloud/pagination"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 )
 
@@ -38,47 +38,14 @@ type Instances struct {
 func (os *OpenStack) Instances() (cloudprovider.Instances, bool) {
 	glog.V(4).Info("openstack.Instances() called")
 
-	compute, err := openstack.NewComputeV2(os.provider, gophercloud.EndpointOpts{
-		Region: os.region,
-	})
+	compute, err := os.NewComputeV2()
 	if err != nil {
-		glog.Warningf("Failed to find compute endpoint: %v", err)
 		return nil, false
 	}
 
 	glog.V(1).Info("Claiming to support Instances")
 
 	return &Instances{compute}, true
-}
-
-func (i *Instances) List(name_filter string) ([]types.NodeName, error) {
-	glog.V(4).Infof("openstack List(%v) called", name_filter)
-
-	opts := servers.ListOpts{
-		Name:   name_filter,
-		Status: "ACTIVE",
-	}
-	pager := servers.List(i.compute, opts)
-
-	ret := make([]types.NodeName, 0)
-	err := pager.EachPage(func(page pagination.Page) (bool, error) {
-		sList, err := servers.ExtractServers(page)
-		if err != nil {
-			return false, err
-		}
-		for i := range sList {
-			ret = append(ret, mapServerToNodeName(&sList[i]))
-		}
-		return true, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	glog.V(3).Infof("Found %v instances matching %v: %v",
-		len(ret), name_filter, ret)
-
-	return ret, nil
 }
 
 // Implementation of Instances.CurrentNodeName
@@ -111,7 +78,24 @@ func (i *Instances) NodeAddresses(name types.NodeName) ([]v1.NodeAddress, error)
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
 func (i *Instances) NodeAddressesByProviderID(providerID string) ([]v1.NodeAddress, error) {
-	return []v1.NodeAddress{}, errors.New("unimplemented")
+	instanceID, err := instanceIDFromProviderID(providerID)
+
+	if err != nil {
+		return []v1.NodeAddress{}, err
+	}
+
+	server, err := servers.Get(i.compute, instanceID).Extract()
+
+	if err != nil {
+		return []v1.NodeAddress{}, err
+	}
+
+	addresses, err := nodeAddresses(server)
+	if err != nil {
+		return []v1.NodeAddress{}, err
+	}
+
+	return addresses, nil
 }
 
 // ExternalID returns the cloud provider ID of the specified instance (deprecated).
@@ -128,6 +112,13 @@ func (i *Instances) ExternalID(name types.NodeName) (string, error) {
 
 // InstanceID returns the kubelet's cloud provider ID.
 func (os *OpenStack) InstanceID() (string, error) {
+	if len(os.localInstanceID) == 0 {
+		id, err := readInstanceID()
+		if err != nil {
+			return "", err
+		}
+		os.localInstanceID = id
+	}
 	return os.localInstanceID, nil
 }
 
@@ -146,10 +137,54 @@ func (i *Instances) InstanceID(name types.NodeName) (string, error) {
 // This method will not be called from the node that is requesting this ID. i.e. metadata service
 // and other local methods cannot be used here
 func (i *Instances) InstanceTypeByProviderID(providerID string) (string, error) {
-	return "", errors.New("unimplemented")
+	instanceID, err := instanceIDFromProviderID(providerID)
+
+	if err != nil {
+		return "", err
+	}
+
+	server, err := servers.Get(i.compute, instanceID).Extract()
+
+	if err != nil {
+		return "", err
+	}
+
+	return srvInstanceType(server)
 }
 
 // InstanceType returns the type of the specified instance.
 func (i *Instances) InstanceType(name types.NodeName) (string, error) {
-	return "", nil
+	srv, err := getServerByName(i.compute, name)
+
+	if err != nil {
+		return "", err
+	}
+
+	return srvInstanceType(srv)
+}
+
+func srvInstanceType(srv *servers.Server) (string, error) {
+	keys := []string{"name", "id", "original_name"}
+	for _, key := range keys {
+		val, found := srv.Flavor[key]
+		if found {
+			flavor, ok := val.(string)
+			if ok {
+				return flavor, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("flavor name/id not found")
+}
+
+func instanceIDFromProviderID(providerID string) (instanceID string, err error) {
+	parsedID, err := url.Parse(providerID)
+	if err != nil {
+		return "", err
+	}
+	if parsedID.Scheme != ProviderName {
+		return "", fmt.Errorf("unrecognized provider %q", parsedID.Scheme)
+	}
+
+	return parsedID.Host, nil
 }

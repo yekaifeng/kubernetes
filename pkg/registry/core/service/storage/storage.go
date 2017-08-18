@@ -35,19 +35,18 @@ type REST struct {
 // NewREST returns a RESTStorage object that will work against services.
 func NewREST(optsGetter generic.RESTOptionsGetter) (*REST, *StatusREST) {
 	store := &genericregistry.Store{
-		Copier:            api.Scheme,
-		NewFunc:           func() runtime.Object { return &api.Service{} },
-		NewListFunc:       func() runtime.Object { return &api.ServiceList{} },
-		PredicateFunc:     service.MatchServices,
-		QualifiedResource: api.Resource("services"),
-		WatchCacheSize:    cachesize.GetWatchCacheSizeByResource("services"),
+		Copier:                   api.Scheme,
+		NewFunc:                  func() runtime.Object { return &api.Service{} },
+		NewListFunc:              func() runtime.Object { return &api.ServiceList{} },
+		DefaultQualifiedResource: api.Resource("services"),
+		WatchCacheSize:           cachesize.GetWatchCacheSizeByResource("services"),
 
 		CreateStrategy: service.Strategy,
 		UpdateStrategy: service.Strategy,
 		DeleteStrategy: service.Strategy,
 		ExportStrategy: service.Strategy,
 	}
-	options := &generic.StoreOptions{RESTOptions: optsGetter, AttrFunc: service.GetAttrs}
+	options := &generic.StoreOptions{RESTOptions: optsGetter}
 	if err := store.CompleteWithOptions(options); err != nil {
 		panic(err) // TODO: Propagate error up
 	}
@@ -63,6 +62,14 @@ var _ rest.ShortNamesProvider = &REST{}
 // ShortNames implements the ShortNamesProvider interface. Returns a list of short names for a resource.
 func (r *REST) ShortNames() []string {
 	return []string{"svc"}
+}
+
+// Implement CategoriesProvider
+var _ rest.CategoriesProvider = &REST{}
+
+// Categories implements the CategoriesProvider interface. Returns a list of categories a resource is part of.
+func (r *REST) Categories() []string {
+	return []string{"all"}
 }
 
 // StatusREST implements the REST endpoint for changing the status of a service.

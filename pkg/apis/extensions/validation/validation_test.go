@@ -2494,6 +2494,10 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 		seccomp.AllowedProfilesAnnotationKey: "docker/default,not-good",
 	}
 
+	invalidDefaultAllowPrivilegeEscalation := validPSP()
+	pe := true
+	invalidDefaultAllowPrivilegeEscalation.Spec.DefaultAllowPrivilegeEscalation = &pe
+
 	type testCase struct {
 		psp         *extensions.PodSecurityPolicy
 		errorType   field.ErrorType
@@ -2600,6 +2604,11 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 			errorType:   field.ErrorTypeInvalid,
 			errorDetail: "must be a valid seccomp profile",
 		},
+		"invalid defaultAllowPrivilegeEscalation": {
+			psp:         invalidDefaultAllowPrivilegeEscalation,
+			errorType:   field.ErrorTypeInvalid,
+			errorDetail: "Cannot set DefaultAllowPrivilegeEscalation to true without also setting AllowPrivilegeEscalation to true",
+		},
 	}
 
 	for k, v := range errorCases {
@@ -2674,6 +2683,11 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 		seccomp.AllowedProfilesAnnotationKey: "docker/default,unconfined,localhost/foo",
 	}
 
+	validDefaultAllowPrivilegeEscalation := validPSP()
+	pe = true
+	validDefaultAllowPrivilegeEscalation.Spec.DefaultAllowPrivilegeEscalation = &pe
+	validDefaultAllowPrivilegeEscalation.Spec.AllowPrivilegeEscalation = true
+
 	successCases := map[string]struct {
 		psp *extensions.PodSecurityPolicy
 	}{
@@ -2700,6 +2714,9 @@ func TestValidatePodSecurityPolicy(t *testing.T) {
 		},
 		"valid seccomp annotations": {
 			psp: validSeccomp,
+		},
+		"valid defaultAllowPrivilegeEscalation as true": {
+			psp: validDefaultAllowPrivilegeEscalation,
 		},
 	}
 
@@ -2747,326 +2764,6 @@ func TestValidatePSPVolumes(t *testing.T) {
 		errs := ValidatePodSecurityPolicy(psp)
 		if len(errs) != 0 {
 			t.Errorf("%s validation expected no errors but received %v", strVolume, errs)
-		}
-	}
-}
-
-func TestValidateNetworkPolicy(t *testing.T) {
-	protocolTCP := api.ProtocolTCP
-	protocolUDP := api.ProtocolUDP
-	protocolICMP := api.Protocol("ICMP")
-
-	successCases := []extensions.NetworkPolicy{
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From:  []extensions.NetworkPolicyPeer{},
-						Ports: []extensions.NetworkPolicyPort{},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						Ports: []extensions.NetworkPolicyPort{
-							{
-								Protocol: nil,
-								Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 80},
-							},
-							{
-								Protocol: &protocolTCP,
-								Port:     nil,
-							},
-							{
-								Protocol: &protocolTCP,
-								Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 443},
-							},
-							{
-								Protocol: &protocolUDP,
-								Port:     &intstr.IntOrString{Type: intstr.String, StrVal: "dns"},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								PodSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"c": "d"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"c": "d"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Success cases are expected to pass validation.
-	for k, v := range successCases {
-		if errs := ValidateNetworkPolicy(&v); len(errs) != 0 {
-			t.Errorf("Expected success for %d, got %v", k, errs)
-		}
-	}
-
-	invalidSelector := map[string]string{"NoUppercaseOrSpecialCharsLike=Equals": "b"}
-	errorCases := map[string]extensions.NetworkPolicy{
-		"namespaceSelector and podSelector": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{"a": "b"},
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								PodSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"c": "d"},
-								},
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"c": "d"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid spec.podSelector": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: invalidSelector,
-				},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"c": "d"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid ingress.ports.protocol": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						Ports: []extensions.NetworkPolicyPort{
-							{
-								Protocol: &protocolICMP,
-								Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 80},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid ingress.ports.port (int)": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						Ports: []extensions.NetworkPolicyPort{
-							{
-								Protocol: &protocolTCP,
-								Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 123456789},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid ingress.ports.port (str)": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						Ports: []extensions.NetworkPolicyPort{
-							{
-								Protocol: &protocolTCP,
-								Port:     &intstr.IntOrString{Type: intstr.String, StrVal: "!@#$"},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid ingress.from.podSelector": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								PodSelector: &metav1.LabelSelector{
-									MatchLabels: invalidSelector,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		"invalid ingress.from.namespaceSelector": {
-			ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-			Spec: extensions.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{},
-				Ingress: []extensions.NetworkPolicyIngressRule{
-					{
-						From: []extensions.NetworkPolicyPeer{
-							{
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: invalidSelector,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Error cases are not expected to pass validation.
-	for testName, networkPolicy := range errorCases {
-		if errs := ValidateNetworkPolicy(&networkPolicy); len(errs) == 0 {
-			t.Errorf("Expected failure for test: %s", testName)
-		}
-	}
-}
-
-func TestValidateNetworkPolicyUpdate(t *testing.T) {
-	type npUpdateTest struct {
-		old    extensions.NetworkPolicy
-		update extensions.NetworkPolicy
-	}
-	successCases := []npUpdateTest{
-		{
-			old: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{"a": "b"},
-					},
-					Ingress: []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-			update: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{"a": "b"},
-					},
-					Ingress: []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-		},
-	}
-
-	for _, successCase := range successCases {
-		successCase.old.ObjectMeta.ResourceVersion = "1"
-		successCase.update.ObjectMeta.ResourceVersion = "1"
-		if errs := ValidateNetworkPolicyUpdate(&successCase.update, &successCase.old); len(errs) != 0 {
-			t.Errorf("expected success: %v", errs)
-		}
-	}
-	errorCases := map[string]npUpdateTest{
-		"change name": {
-			old: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{},
-					Ingress:     []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-			update: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "baz", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{},
-					Ingress:     []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-		},
-		"change spec": {
-			old: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{},
-					Ingress:     []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-			update: extensions.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-				Spec: extensions.NetworkPolicySpec{
-					PodSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{"a": "b"},
-					},
-					Ingress: []extensions.NetworkPolicyIngressRule{},
-				},
-			},
-		},
-	}
-
-	for testName, errorCase := range errorCases {
-		if errs := ValidateNetworkPolicyUpdate(&errorCase.update, &errorCase.old); len(errs) == 0 {
-			t.Errorf("expected failure: %s", testName)
 		}
 	}
 }

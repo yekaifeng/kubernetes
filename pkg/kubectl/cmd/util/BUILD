@@ -1,5 +1,3 @@
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -19,16 +17,14 @@ go_library(
         "printing.go",
         "shortcut_restmapper.go",
     ],
-    tags = ["automanaged"],
     visibility = [
         "//build/visible_to:pkg_kubectl_cmd_util_CONSUMERS",
     ],
     deps = [
         "//federation/apis/federation:go_default_library",
-        "//federation/client/clientset_generated/federation_internalclientset:go_default_library",
+        "//federation/client/clientset_generated/federation_clientset:go_default_library",
         "//pkg/api:go_default_library",
         "//pkg/api/v1:go_default_library",
-        "//pkg/api/validation:go_default_library",
         "//pkg/apis/apps:go_default_library",
         "//pkg/apis/batch:go_default_library",
         "//pkg/apis/extensions:go_default_library",
@@ -40,16 +36,17 @@ go_library(
         "//pkg/kubectl/cmd/util/openapi:go_default_library",
         "//pkg/kubectl/plugins:go_default_library",
         "//pkg/kubectl/resource:go_default_library",
+        "//pkg/kubectl/validation:go_default_library",
         "//pkg/printers:go_default_library",
         "//pkg/printers/internalversion:go_default_library",
-        "//pkg/util/exec:go_default_library",
         "//pkg/version:go_default_library",
         "//vendor/github.com/emicklei/go-restful-swagger12:go_default_library",
         "//vendor/github.com/evanphx/json-patch:go_default_library",
-        "//vendor/github.com/go-openapi/spec:go_default_library",
         "//vendor/github.com/golang/glog:go_default_library",
+        "//vendor/github.com/googleapis/gnostic/OpenAPIv2:go_default_library",
         "//vendor/github.com/spf13/cobra:go_default_library",
         "//vendor/github.com/spf13/pflag:go_default_library",
+        "//vendor/k8s.io/api/core/v1:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/errors:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/meta:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
@@ -72,6 +69,7 @@ go_library(
         "//vendor/k8s.io/client-go/rest:go_default_library",
         "//vendor/k8s.io/client-go/tools/clientcmd:go_default_library",
         "//vendor/k8s.io/client-go/util/homedir:go_default_library",
+        "//vendor/k8s.io/utils/exec:go_default_library",
     ],
 )
 
@@ -88,7 +86,6 @@ go_test(
         "//api/swagger-spec",
     ],
     library = ":go_default_library",
-    tags = ["automanaged"],
     visibility = [
         "//build/visible_to:COMMON_testing",
     ],
@@ -96,8 +93,6 @@ go_test(
         "//pkg/api:go_default_library",
         "//pkg/api/testapi:go_default_library",
         "//pkg/api/testing:go_default_library",
-        "//pkg/api/v1:go_default_library",
-        "//pkg/api/validation:go_default_library",
         "//pkg/apis/apps:go_default_library",
         "//pkg/apis/batch:go_default_library",
         "//pkg/apis/extensions:go_default_library",
@@ -106,10 +101,11 @@ go_test(
         "//pkg/controller:go_default_library",
         "//pkg/kubectl:go_default_library",
         "//pkg/kubectl/resource:go_default_library",
-        "//pkg/util/exec:go_default_library",
+        "//pkg/kubectl/validation:go_default_library",
         "//vendor/github.com/emicklei/go-restful-swagger12:go_default_library",
-        "//vendor/github.com/go-openapi/spec:go_default_library",
+        "//vendor/github.com/googleapis/gnostic/OpenAPIv2:go_default_library",
         "//vendor/github.com/stretchr/testify/assert:go_default_library",
+        "//vendor/k8s.io/api/core/v1:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/equality:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/errors:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/meta:go_default_library",
@@ -128,6 +124,7 @@ go_test(
         "//vendor/k8s.io/client-go/testing:go_default_library",
         "//vendor/k8s.io/client-go/tools/clientcmd:go_default_library",
         "//vendor/k8s.io/client-go/tools/clientcmd/api:go_default_library",
+        "//vendor/k8s.io/utils/exec:go_default_library",
     ],
 )
 

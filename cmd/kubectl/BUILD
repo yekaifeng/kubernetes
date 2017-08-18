@@ -1,10 +1,9 @@
-licenses(["notice"])
-
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_binary",
     "go_library",
 )
+load("//pkg/version:def.bzl", "version_x_defs")
 
 go_binary(
     name = "kubectl",
@@ -15,17 +14,16 @@ go_binary(
         "-static",
     ],
     library = ":go_default_library",
-    linkstamp = "k8s.io/kubernetes/pkg/version",
-    tags = ["automanaged"],
     visibility = [
         "//build/visible_to:COMMON_release",
     ],
+    x_defs = version_x_defs(),
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["kubectl.go"],
-    tags = ["automanaged"],
+    visibility = ["//visibility:private"],
     deps = ["//cmd/kubectl/app:go_default_library"],
 )
 

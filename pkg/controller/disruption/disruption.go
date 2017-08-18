@@ -21,33 +21,32 @@ import (
 	"reflect"
 	"time"
 
+	apps "k8s.io/api/apps/v1beta1"
+	"k8s.io/api/core/v1"
+	"k8s.io/api/extensions/v1beta1"
+	policy "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	appsinformers "k8s.io/client-go/informers/apps/v1beta1"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+	extensionsinformers "k8s.io/client-go/informers/extensions/v1beta1"
+	policyinformers "k8s.io/client-go/informers/policy/v1beta1"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
-	clientv1 "k8s.io/client-go/pkg/api/v1"
+	policyclientset "k8s.io/client-go/kubernetes/typed/policy/v1beta1"
+	appslisters "k8s.io/client-go/listers/apps/v1beta1"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	extensionslisters "k8s.io/client-go/listers/extensions/v1beta1"
+	policylisters "k8s.io/client-go/listers/policy/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/api/v1"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-	apps "k8s.io/kubernetes/pkg/apis/apps/v1beta1"
-	"k8s.io/kubernetes/pkg/apis/extensions/v1beta1"
-	policy "k8s.io/kubernetes/pkg/apis/policy/v1beta1"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
-	policyclientset "k8s.io/kubernetes/pkg/client/clientset_generated/clientset/typed/policy/v1beta1"
-	appsinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/externalversions/apps/v1beta1"
-	coreinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/externalversions/core/v1"
-	extensionsinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/externalversions/extensions/v1beta1"
-	policyinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/externalversions/policy/v1beta1"
-	appslisters "k8s.io/kubernetes/pkg/client/listers/apps/v1beta1"
-	corelisters "k8s.io/kubernetes/pkg/client/listers/core/v1"
-	extensionslisters "k8s.io/kubernetes/pkg/client/listers/extensions/v1beta1"
-	policylisters "k8s.io/kubernetes/pkg/client/listers/policy/v1beta1"
 	"k8s.io/kubernetes/pkg/controller"
 
 	"github.com/golang/glog"
@@ -125,7 +124,7 @@ func NewDisruptionController(
 		recheckQueue: workqueue.NewNamedDelayingQueue("disruption-recheck"),
 		broadcaster:  record.NewBroadcaster(),
 	}
-	dc.recorder = dc.broadcaster.NewRecorder(api.Scheme, clientv1.EventSource{Component: "controllermanager"})
+	dc.recorder = dc.broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "controllermanager"})
 
 	dc.getUpdater = func() updater { return dc.writePdbStatus }
 
@@ -185,7 +184,7 @@ var (
 // getPodReplicaSets finds replicasets which have no matching deployments.
 func (dc *DisruptionController) getPodReplicaSets(pod *v1.Pod) ([]controllerAndScale, error) {
 	var casSlice []controllerAndScale
-	controllerRef := controller.GetControllerOf(pod)
+	controllerRef := metav1.GetControllerOf(pod)
 	if controllerRef == nil {
 		return nil, nil
 	}
@@ -200,7 +199,7 @@ func (dc *DisruptionController) getPodReplicaSets(pod *v1.Pod) ([]controllerAndS
 	if rs.UID != controllerRef.UID {
 		return nil, nil
 	}
-	controllerRef = controller.GetControllerOf(rs)
+	controllerRef = metav1.GetControllerOf(rs)
 	if controllerRef != nil && controllerRef.Kind == controllerKindDep.Kind {
 		// Skip RS if it's controlled by a Deployment.
 		return nil, nil
@@ -212,7 +211,7 @@ func (dc *DisruptionController) getPodReplicaSets(pod *v1.Pod) ([]controllerAndS
 // getPodStatefulSet returns the statefulset managing the given pod.
 func (dc *DisruptionController) getPodStatefulSets(pod *v1.Pod) ([]controllerAndScale, error) {
 	var casSlice []controllerAndScale
-	controllerRef := controller.GetControllerOf(pod)
+	controllerRef := metav1.GetControllerOf(pod)
 	if controllerRef == nil {
 		return nil, nil
 	}
@@ -235,7 +234,7 @@ func (dc *DisruptionController) getPodStatefulSets(pod *v1.Pod) ([]controllerAnd
 // getPodDeployments finds deployments for any replicasets which are being managed by deployments.
 func (dc *DisruptionController) getPodDeployments(pod *v1.Pod) ([]controllerAndScale, error) {
 	var casSlice []controllerAndScale
-	controllerRef := controller.GetControllerOf(pod)
+	controllerRef := metav1.GetControllerOf(pod)
 	if controllerRef == nil {
 		return nil, nil
 	}
@@ -250,7 +249,7 @@ func (dc *DisruptionController) getPodDeployments(pod *v1.Pod) ([]controllerAndS
 	if rs.UID != controllerRef.UID {
 		return nil, nil
 	}
-	controllerRef = controller.GetControllerOf(rs)
+	controllerRef = metav1.GetControllerOf(rs)
 	if controllerRef == nil {
 		return nil, nil
 	}
@@ -271,7 +270,7 @@ func (dc *DisruptionController) getPodDeployments(pod *v1.Pod) ([]controllerAndS
 
 func (dc *DisruptionController) getPodReplicationControllers(pod *v1.Pod) ([]controllerAndScale, error) {
 	var casSlice []controllerAndScale
-	controllerRef := controller.GetControllerOf(pod)
+	controllerRef := metav1.GetControllerOf(pod)
 	if controllerRef == nil {
 		return nil, nil
 	}
@@ -421,6 +420,8 @@ func (dc *DisruptionController) getPdbForPod(pod *v1.Pod) *policy.PodDisruptionB
 	return pdbs[0]
 }
 
+// This function returns pods using the PodDisruptionBudget object.
+// IMPORTANT NOTE : the returned pods should NOT be modified.
 func (dc *DisruptionController) getPodsForPdb(pdb *policy.PodDisruptionBudget) ([]*v1.Pod, error) {
 	sel, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 	if sel.Empty() {
@@ -433,12 +434,7 @@ func (dc *DisruptionController) getPodsForPdb(pdb *policy.PodDisruptionBudget) (
 	if err != nil {
 		return []*v1.Pod{}, err
 	}
-	// TODO: Do we need to copy here?
-	result := make([]*v1.Pod, 0, len(pods))
-	for i := range pods {
-		result = append(result, &(*pods[i]))
-	}
-	return result, nil
+	return pods, nil
 }
 
 func (dc *DisruptionController) worker() {
@@ -692,7 +688,7 @@ func (dc *DisruptionController) buildDisruptedPodMap(pods []*v1.Pod, pdb *policy
 // this field correctly, we will prevent the /evict handler from approving an
 // eviction when it may be unsafe to do so.
 func (dc *DisruptionController) failSafe(pdb *policy.PodDisruptionBudget) error {
-	obj, err := api.Scheme.DeepCopy(pdb)
+	obj, err := scheme.Scheme.DeepCopy(pdb)
 	if err != nil {
 		return err
 	}
@@ -723,7 +719,7 @@ func (dc *DisruptionController) updatePdbStatus(pdb *policy.PodDisruptionBudget,
 		return nil
 	}
 
-	obj, err := api.Scheme.DeepCopy(pdb)
+	obj, err := scheme.Scheme.DeepCopy(pdb)
 	if err != nil {
 		return err
 	}

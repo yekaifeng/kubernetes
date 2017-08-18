@@ -61,12 +61,12 @@ type REST struct {
 // NewREST returns a RESTStorage object that will work against replication controllers.
 func NewREST(optsGetter generic.RESTOptionsGetter) (*REST, *StatusREST) {
 	store := &genericregistry.Store{
-		Copier:            api.Scheme,
-		NewFunc:           func() runtime.Object { return &api.ReplicationController{} },
-		NewListFunc:       func() runtime.Object { return &api.ReplicationControllerList{} },
-		PredicateFunc:     replicationcontroller.MatchController,
-		QualifiedResource: api.Resource("replicationcontrollers"),
-		WatchCacheSize:    cachesize.GetWatchCacheSizeByResource("replicationcontrollers"),
+		Copier:                   api.Scheme,
+		NewFunc:                  func() runtime.Object { return &api.ReplicationController{} },
+		NewListFunc:              func() runtime.Object { return &api.ReplicationControllerList{} },
+		PredicateFunc:            replicationcontroller.MatchController,
+		DefaultQualifiedResource: api.Resource("replicationcontrollers"),
+		WatchCacheSize:           cachesize.GetWatchCacheSizeByResource("replicationcontrollers"),
 
 		CreateStrategy: replicationcontroller.Strategy,
 		UpdateStrategy: replicationcontroller.Strategy,
@@ -89,6 +89,14 @@ var _ rest.ShortNamesProvider = &REST{}
 // ShortNames implements the ShortNamesProvider interface. Returns a list of short names for a resource.
 func (r *REST) ShortNames() []string {
 	return []string{"rc"}
+}
+
+// Implement CategoriesProvider
+var _ rest.CategoriesProvider = &REST{}
+
+// Categories implements the CategoriesProvider interface. Returns a list of categories a resource is part of.
+func (r *REST) Categories() []string {
+	return []string{"all"}
 }
 
 // StatusREST implements the REST endpoint for changing the status of a replication controller

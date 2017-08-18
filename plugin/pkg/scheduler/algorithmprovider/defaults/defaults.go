@@ -20,9 +20,7 @@ import (
 	"os"
 	"strconv"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm/predicates"
@@ -86,10 +84,10 @@ func init() {
 	// predicates.GeneralPredicates()
 	factory.RegisterFitPredicate("HostName", predicates.PodFitsHost)
 	// Fit is determined by node selector query.
-	factory.RegisterFitPredicate("MatchNodeSelector", predicates.PodSelectorMatches)
+	factory.RegisterFitPredicate("MatchNodeSelector", predicates.PodMatchNodeSelector)
 
 	// Use equivalence class to speed up predicates & priorities
-	factory.RegisterGetEquivalencePodFunction(GetEquivalencePod)
+	factory.RegisterGetEquivalencePodFunction(predicates.GetEquivalencePod)
 
 	// ServiceSpreadingPriority is a priority config factory that spreads pods by minimizing
 	// the number of pods (belonging to the same service) on the same node.
@@ -176,6 +174,17 @@ func defaultPredicates() sets.String {
 
 		// Fit is determined by node disk pressure condition.
 		factory.RegisterFitPredicate("CheckNodeDiskPressure", predicates.CheckNodeDiskPressurePredicate),
+
+		// Fit is determied by node condtions: not ready, network unavailable and out of disk.
+		factory.RegisterMandatoryFitPredicate("CheckNodeCondition", predicates.CheckNodeConditionPredicate),
+
+		// Fit is determined by volume zone requirements.
+		factory.RegisterFitPredicateFactory(
+			"NoVolumeNodeConflict",
+			func(args factory.PluginFactoryArgs) algorithm.FitPredicate {
+				return predicates.NewVolumeNodePredicate(args.PVInfo, args.PVCInfo, nil)
+			},
+		),
 	)
 }
 
@@ -243,28 +252,4 @@ func copyAndReplace(set sets.String, replaceWhat, replaceWith string) sets.Strin
 		result.Insert(replaceWith)
 	}
 	return result
-}
-
-// GetEquivalencePod returns a EquivalencePod which contains a group of pod attributes which can be reused.
-func GetEquivalencePod(pod *v1.Pod) interface{} {
-	// For now we only consider pods:
-	// 1. OwnerReferences is Controller
-	// 2. with same OwnerReferences
-	// to be equivalent
-	if len(pod.OwnerReferences) != 0 {
-		for _, ref := range pod.OwnerReferences {
-			if *ref.Controller {
-				// a pod can only belongs to one controller
-				return &EquivalencePod{
-					ControllerRef: ref,
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// EquivalencePod is a group of pod attributes which can be reused as equivalence to schedule other pods.
-type EquivalencePod struct {
-	ControllerRef metav1.OwnerReference
 }

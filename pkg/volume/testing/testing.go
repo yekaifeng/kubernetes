@@ -27,13 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	clientset "k8s.io/client-go/kubernetes"
 	utiltesting "k8s.io/client-go/util/testing"
-	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/util/io"
 	"k8s.io/kubernetes/pkg/util/mount"
@@ -50,10 +50,25 @@ type fakeVolumeHost struct {
 	cloud      cloudprovider.Interface
 	mounter    mount.Interface
 	writer     io.Writer
+	nodeLabels map[string]string
 }
 
 func NewFakeVolumeHost(rootDir string, kubeClient clientset.Interface, plugins []VolumePlugin) *fakeVolumeHost {
-	host := &fakeVolumeHost{rootDir: rootDir, kubeClient: kubeClient, cloud: nil}
+	return newFakeVolumeHost(rootDir, kubeClient, plugins, nil)
+}
+
+func NewFakeVolumeHostWithCloudProvider(rootDir string, kubeClient clientset.Interface, plugins []VolumePlugin, cloud cloudprovider.Interface) *fakeVolumeHost {
+	return newFakeVolumeHost(rootDir, kubeClient, plugins, cloud)
+}
+
+func NewFakeVolumeHostWithNodeLabels(rootDir string, kubeClient clientset.Interface, plugins []VolumePlugin, labels map[string]string) *fakeVolumeHost {
+	volHost := newFakeVolumeHost(rootDir, kubeClient, plugins, nil)
+	volHost.nodeLabels = labels
+	return volHost
+}
+
+func newFakeVolumeHost(rootDir string, kubeClient clientset.Interface, plugins []VolumePlugin, cloud cloudprovider.Interface) *fakeVolumeHost {
+	host := &fakeVolumeHost{rootDir: rootDir, kubeClient: kubeClient, cloud: cloud}
 	host.mounter = &mount.FakeMounter{}
 	host.writer = &io.StdWriter{}
 	host.pluginMgr.InitPlugins(plugins, host)
@@ -132,6 +147,19 @@ func (f *fakeVolumeHost) GetSecretFunc() func(namespace, name string) (*v1.Secre
 	return func(namespace, name string) (*v1.Secret, error) {
 		return f.kubeClient.Core().Secrets(namespace).Get(name, metav1.GetOptions{})
 	}
+}
+
+func (f *fakeVolumeHost) GetConfigMapFunc() func(namespace, name string) (*v1.ConfigMap, error) {
+	return func(namespace, name string) (*v1.ConfigMap, error) {
+		return f.kubeClient.Core().ConfigMaps(namespace).Get(name, metav1.GetOptions{})
+	}
+}
+
+func (f *fakeVolumeHost) GetNodeLabels() (map[string]string, error) {
+	if f.nodeLabels == nil {
+		f.nodeLabels = map[string]string{"test-label": "test-value"}
+	}
+	return f.nodeLabels, nil
 }
 
 func ProbeVolumePlugins(config VolumeConfig) []VolumePlugin {
@@ -344,7 +372,7 @@ func (fv *FakeVolume) CanMount() error {
 	return nil
 }
 
-func (fv *FakeVolume) SetUp(fsGroup *types.UnixGroupID) error {
+func (fv *FakeVolume) SetUp(fsGroup *int64) error {
 	fv.Lock()
 	defer fv.Unlock()
 	fv.SetUpCallCount++
@@ -357,7 +385,7 @@ func (fv *FakeVolume) GetSetUpCallCount() int {
 	return fv.SetUpCallCount
 }
 
-func (fv *FakeVolume) SetUpAt(dir string, fsGroup *types.UnixGroupID) error {
+func (fv *FakeVolume) SetUpAt(dir string, fsGroup *int64) error {
 	return os.MkdirAll(dir, 0750)
 }
 

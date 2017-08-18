@@ -76,7 +76,7 @@ function replicate-master-instance() {
 function create-master-instance-internal() {
   local gcloud="gcloud"
   if [[ "${ENABLE_IP_ALIASES:-}" == 'true' ]]; then
-    gcloud="gcloud alpha"
+    gcloud="gcloud beta"
   fi
 
   local -r master_name="${1}"
@@ -116,7 +116,7 @@ function create-master-instance-internal() {
     --scopes "storage-ro,compute-rw,monitoring,logging-write" \
     --metadata-from-file "${metadata}" \
     --disk "${disk}" \
-    --boot-disk-size "${MASTER_ROOT_DISK_SIZE:-10}" \
+    --boot-disk-size "${MASTER_ROOT_DISK_SIZE}" \
     ${preemptible_master} \
     ${network}
 }

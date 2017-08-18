@@ -28,10 +28,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"k8s.io/kubernetes/pkg/api/v1"
+	apps "k8s.io/api/apps/v1beta1"
+	"k8s.io/api/core/v1"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
-	apps "k8s.io/kubernetes/pkg/apis/apps/v1beta1"
-	"k8s.io/kubernetes/pkg/controller"
+	"k8s.io/kubernetes/pkg/controller/history"
 )
 
 func TestGetParentNameAndOrdinal(t *testing.T) {
@@ -212,25 +212,10 @@ func TestIsRunningAndReady(t *testing.T) {
 	if !isRunningAndReady(pod) {
 		t.Error("Pod should be running and ready")
 	}
-	pod.Annotations[apps.StatefulSetInitAnnotation] = "true"
-	if !isRunningAndReady(pod) {
-		t.Error("isRunningAndReady does not respected init annotation set to true")
-	}
-	pod.Annotations[apps.StatefulSetInitAnnotation] = "false"
-	if isRunningAndReady(pod) {
-		t.Error("isRunningAndReady does not respected init annotation set to false")
-	}
-	pod.Annotations[apps.StatefulSetInitAnnotation] = "blah"
-	if !isRunningAndReady(pod) {
-		t.Error("isRunningAndReady does not erroneous init annotation")
-	}
 }
 
 func TestAscendingOrdinal(t *testing.T) {
 	set := newStatefulSet(10)
-	for i := 0; i < 10; i++ {
-
-	}
 	pods := make([]*v1.Pod, 10)
 	perm := rand.Perm(10)
 	for i, v := range perm {
@@ -266,7 +251,7 @@ func TestOverlappingStatefulSets(t *testing.T) {
 func TestNewPodControllerRef(t *testing.T) {
 	set := newStatefulSet(1)
 	pod := newStatefulSetPod(set, 0)
-	controllerRef := controller.GetControllerOf(pod)
+	controllerRef := metav1.GetControllerOf(pod)
 	if controllerRef == nil {
 		t.Fatalf("No ControllerRef found on new pod")
 	}
@@ -284,6 +269,39 @@ func TestNewPodControllerRef(t *testing.T) {
 	}
 	if got, want := *controllerRef.Controller, true; got != want {
 		t.Errorf("controllerRef.Controller = %v, want %v", got, want)
+	}
+}
+
+func TestCreateApplyRevision(t *testing.T) {
+	set := newStatefulSet(1)
+	revision, err := newRevision(set, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.Spec.Template.Spec.Containers[0].Name = "foo"
+	if set.Annotations == nil {
+		set.Annotations = make(map[string]string)
+	}
+	key := "foo"
+	expectedValue := "bar"
+	set.Annotations[key] = expectedValue
+	restoredSet, err := applyRevision(set, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredRevision, err := newRevision(restoredSet, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !history.EqualRevision(revision, restoredRevision) {
+		t.Errorf("wanted %v got %v", string(revision.Data.Raw), string(restoredRevision.Data.Raw))
+	}
+	value, ok := restoredRevision.Annotations[key]
+	if !ok {
+		t.Errorf("missing annotation %s", key)
+	}
+	if value != expectedValue {
+		t.Errorf("for annotation %s wanted %s got %s", key, expectedValue, value)
 	}
 }
 
@@ -354,6 +372,11 @@ func newStatefulSetWithVolumes(replicas int, name string, petMounts []v1.VolumeM
 			Template:             template,
 			VolumeClaimTemplates: claims,
 			ServiceName:          "governingsvc",
+			UpdateStrategy:       apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+			RevisionHistoryLimit: func() *int32 {
+				limit := int32(2)
+				return &limit
+			}(),
 		},
 	}
 }

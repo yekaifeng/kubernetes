@@ -28,7 +28,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/cmd/set"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
@@ -67,15 +67,6 @@ __kubectl_override_flags()
     done
 }
 
-__kubectl_get_namespaces()
-{
-    local template kubectl_out
-    template="{{ range .items  }}{{ .metadata.name }} {{ end }}"
-    if kubectl_out=$(kubectl get -o template --template="${template}" namespace 2>/dev/null); then
-        COMPREPLY=( $( compgen -W "${kubectl_out[*]}" -- "$cur" ) )
-    fi
-}
-
 __kubectl_config_get_contexts()
 {
     __kubectl_parse_config "contexts"
@@ -92,7 +83,7 @@ __kubectl_config_get_users()
 }
 
 # $1 has to be "contexts", "clusters" or "users"
-__kubectl_config_get()
+__kubectl_parse_config()
 {
     local template kubectl_out
     template="{{ range .$1  }}{{ .name }} {{ end }}"
@@ -117,6 +108,11 @@ __kubectl_get_resource()
         return 1
     fi
     __kubectl_parse_get "${nouns[${#nouns[@]} -1]}"
+}
+
+__kubectl_get_resource_namespace()
+{
+    __kubectl_parse_get "namespace"
 }
 
 __kubectl_get_resource_pod()
@@ -165,7 +161,7 @@ __kubectl_require_pod_and_container()
 
 __custom_func() {
     case ${last_command} in
-        kubectl_get | kubectl_describe | kubectl_delete | kubectl_label | kubectl_stop | kubectl_edit | kubectl_patch |\
+        kubectl_get | kubectl_describe | kubectl_delete | kubectl_label | kubectl_edit | kubectl_patch |\
         kubectl_annotate | kubectl_expose | kubectl_scale | kubectl_autoscale | kubectl_taint | kubectl_rollout_*)
             __kubectl_get_resource
             return
@@ -190,6 +186,10 @@ __custom_func() {
             __kubectl_config_get_contexts
             return
             ;;
+        kubectl_config_delete-cluster)
+            __kubectl_config_get_clusters
+            return
+            ;;
         *)
             ;;
     esac
@@ -208,7 +208,9 @@ __custom_func() {
     * clusters (valid only for federation apiservers)
     * componentstatuses (aka 'cs')
     * configmaps (aka 'cm')
+    * controllerrevisions
     * cronjobs
+    * customresourcedefinition (aka 'crd')
     * daemonsets (aka 'ds')
     * deployments (aka 'deploy')
     * endpoints (aka 'ep')
@@ -237,13 +239,12 @@ __custom_func() {
     * services (aka 'svc')
     * statefulsets
     * storageclasses
-    * thirdpartyresources
     `
 )
 
 var (
 	bash_completion_flags = map[string]string{
-		"namespace": "__kubectl_get_namespaces",
+		"namespace": "__kubectl_get_resource_namespace",
 		"context":   "__kubectl_config_get_contexts",
 		"cluster":   "__kubectl_config_get_clusters",
 		"user":      "__kubectl_config_get_users",
@@ -337,7 +338,7 @@ func NewKubectlCommand(f cmdutil.Factory, in io.Reader, out, err io.Writer) *cob
 		{
 			Message: "Advanced Commands:",
 			Commands: []*cobra.Command{
-				NewCmdApply(f, out, err),
+				NewCmdApply("kubectl", f, out, err),
 				NewCmdPatch(f, out),
 				NewCmdReplace(f, out),
 				deprecatedAlias("update", NewCmdReplace(f, out)),
@@ -355,10 +356,14 @@ func NewKubectlCommand(f cmdutil.Factory, in io.Reader, out, err io.Writer) *cob
 	}
 	groups.Add(cmds)
 
-	filters := []string{
-		"options",
-		deprecated("kubectl", "delete", cmds, NewCmdStop(f, out)),
+	filters := []string{"options"}
+
+	// Hide the "alpha" subcommand if there are no alpha commands in this build.
+	alpha := NewCmdAlpha(f, in, out, err)
+	if !alpha.HasSubCommands() {
+		filters = append(filters, alpha.Name())
 	}
+
 	templates.ActsAsRootCommand(cmds, filters, groups...)
 
 	for name, completion := range bash_completion_flags {
@@ -373,12 +378,13 @@ func NewKubectlCommand(f cmdutil.Factory, in io.Reader, out, err io.Writer) *cob
 		}
 	}
 
+	cmds.AddCommand(alpha)
 	cmds.AddCommand(cmdconfig.NewCmdConfig(clientcmd.NewDefaultPathOptions(), out, err))
 	cmds.AddCommand(NewCmdPlugin(f, in, out, err))
 	cmds.AddCommand(NewCmdVersion(f, out))
 	cmds.AddCommand(NewCmdApiVersions(f, out))
 	cmds.AddCommand(deprecatedAlias("apiversions", NewCmdApiVersions(f, out)))
-	cmds.AddCommand(NewCmdOptions())
+	cmds.AddCommand(NewCmdOptions(out))
 
 	return cmds
 }
@@ -401,6 +407,7 @@ func deprecatedAlias(deprecatedVersion string, cmd *cobra.Command) *cobra.Comman
 
 	cmd.Use = deprecatedVersion
 	cmd.Deprecated = fmt.Sprintf("use %q instead", originalName)
+	cmd.Short = fmt.Sprintf("%s. This command is deprecated, use %q instead", cmd.Short, originalName)
 	cmd.Hidden = true
 	return cmd
 }

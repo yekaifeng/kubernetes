@@ -481,7 +481,7 @@ func TestPodLimitFuncApplyDefault(t *testing.T) {
 	testPod := validPodInit(validPod("foo", 1, getResourceRequirements(api.ResourceList{}, api.ResourceList{})), getResourceRequirements(api.ResourceList{}, api.ResourceList{}))
 	err := PodLimitFunc(&limitRange, &testPod)
 	if err != nil {
-		t.Errorf("Unexpected error for valid pod: %v, %v", testPod.Name, err)
+		t.Errorf("Unexpected error for valid pod: %s, %v", testPod.Name, err)
 	}
 
 	for i := range testPod.Spec.Containers {
@@ -595,7 +595,7 @@ func newHandlerForTest(c clientset.Interface) (admission.Interface, informers.Sh
 	if err != nil {
 		return nil, f, err
 	}
-	pluginInitializer := kubeadmission.NewPluginInitializer(c, f, nil, nil, nil, nil)
+	pluginInitializer := kubeadmission.NewPluginInitializer(c, nil, f, nil, nil, nil, nil)
 	pluginInitializer.Initialize(handler)
 	err = admission.Validate(handler)
 	return handler, f, err

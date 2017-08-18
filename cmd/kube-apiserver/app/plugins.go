@@ -33,25 +33,27 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/exec"
 	"k8s.io/kubernetes/plugin/pkg/admission/gc"
 	"k8s.io/kubernetes/plugin/pkg/admission/imagepolicy"
+	"k8s.io/kubernetes/plugin/pkg/admission/initialization"
 	"k8s.io/kubernetes/plugin/pkg/admission/initialresources"
 	"k8s.io/kubernetes/plugin/pkg/admission/limitranger"
 	"k8s.io/kubernetes/plugin/pkg/admission/namespace/autoprovision"
 	"k8s.io/kubernetes/plugin/pkg/admission/namespace/exists"
-	"k8s.io/kubernetes/plugin/pkg/admission/namespace/lifecycle"
-	noderestriction "k8s.io/kubernetes/plugin/pkg/admission/noderestriction"
+	"k8s.io/kubernetes/plugin/pkg/admission/noderestriction"
 	"k8s.io/kubernetes/plugin/pkg/admission/persistentvolume/label"
 	"k8s.io/kubernetes/plugin/pkg/admission/podnodeselector"
-	podpreset "k8s.io/kubernetes/plugin/pkg/admission/podpreset"
+	"k8s.io/kubernetes/plugin/pkg/admission/podpreset"
 	"k8s.io/kubernetes/plugin/pkg/admission/podtolerationrestriction"
+	podpriority "k8s.io/kubernetes/plugin/pkg/admission/priority"
 	"k8s.io/kubernetes/plugin/pkg/admission/resourcequota"
-	podsecuritypolicy "k8s.io/kubernetes/plugin/pkg/admission/security/podsecuritypolicy"
+	"k8s.io/kubernetes/plugin/pkg/admission/security/podsecuritypolicy"
 	"k8s.io/kubernetes/plugin/pkg/admission/securitycontext/scdeny"
 	"k8s.io/kubernetes/plugin/pkg/admission/serviceaccount"
-	storagedefault "k8s.io/kubernetes/plugin/pkg/admission/storageclass/default"
+	"k8s.io/kubernetes/plugin/pkg/admission/storageclass/setdefault"
+	"k8s.io/kubernetes/plugin/pkg/admission/webhook"
 )
 
-// registerAllAdmissionPlugins registers all admission plugins
-func registerAllAdmissionPlugins(plugins *admission.Plugins) {
+// RegisterAllAdmissionPlugins registers all admission plugins
+func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	admit.Register(plugins)
 	alwayspullimages.Register(plugins)
 	antiaffinity.Register(plugins)
@@ -60,11 +62,11 @@ func registerAllAdmissionPlugins(plugins *admission.Plugins) {
 	exec.Register(plugins)
 	gc.Register(plugins)
 	imagepolicy.Register(plugins)
+	initialization.Register(plugins)
 	initialresources.Register(plugins)
 	limitranger.Register(plugins)
 	autoprovision.Register(plugins)
 	exists.Register(plugins)
-	lifecycle.Register(plugins)
 	noderestriction.Register(plugins)
 	label.Register(plugins)
 	podnodeselector.Register(plugins)
@@ -72,7 +74,9 @@ func registerAllAdmissionPlugins(plugins *admission.Plugins) {
 	podtolerationrestriction.Register(plugins)
 	resourcequota.Register(plugins)
 	podsecuritypolicy.Register(plugins)
+	podpriority.Register(plugins)
 	scdeny.Register(plugins)
 	serviceaccount.Register(plugins)
-	storagedefault.Register(plugins)
+	setdefault.Register(plugins)
+	webhook.Register(plugins)
 }
